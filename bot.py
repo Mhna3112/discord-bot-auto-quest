@@ -206,6 +206,7 @@ async def help_command(interaction: discord.Interaction):
         description="Quản lý việc tự động hoàn thành Discord Quests bằng lệnh Slash.",
         color=discord.Color.cyan()
     )
+    embed.add_field(name="`/gettoken`", value="Lấy mã JavaScript để tự tìm token tài khoản Discord của bạn.", inline=False)
     embed.add_field(name="`/login`", value="Đăng nhập tài khoản làm nhiệm vụ của bạn (Mở popup nhập token bảo mật).", inline=False)
     embed.add_field(name="`/logout`", value="Đăng xuất và xóa token của bạn khỏi hệ thống.", inline=False)
     embed.add_field(name="`/status`", value="Xem danh sách quest hiện tại và tiến độ hoàn thành.", inline=False)
@@ -215,6 +216,48 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="`/help`", value="Hiển thị menu hướng dẫn này.", inline=False)
     embed.set_footer(text="CTDOTEAM - Quest Auto-Completer Bot")
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="gettoken", description="Lấy đoạn mã JavaScript để tự tìm token tài khoản Discord của bạn.")
+async def gettoken(interaction: discord.Interaction):
+    instructions = (
+        "💡 **Hướng dẫn lấy Discord User Token của bạn:**\n\n"
+        "1. Mở Discord trên trình duyệt web (Chrome, Edge, Firefox...) và đăng nhập.\n"
+        "2. Nhấn phím **F12** (hoặc `Ctrl + Shift + I`) để mở Công cụ nhà phát triển (Developer Tools).\n"
+        "3. Chọn tab **Console** ở phía trên thanh công cụ.\n"
+        "4. Copy toàn bộ đoạn mã trong khung dưới đây, dán vào tab Console rồi nhấn **Enter**.\n"
+        "5. Token của bạn sẽ hiển thị ở dòng kết quả. Dùng lệnh `/login` để liên kết nó với Bot.\n\n"
+        "⚠️ **CẢNH BÁO BẢO MẬT**: *Tuyệt đối KHÔNG chia sẻ token này với bất kỳ ai khác! Người khác có token này sẽ có toàn quyền truy cập và kiểm soát tài khoản của bạn.*"
+    )
+    
+    code_block = (
+        "```javascript\n"
+        "(() => {\n"
+        "  let token;\n"
+        "  window.webpackChunkdiscord_app.push([[Symbol()], {}, req => {\n"
+        "    for (let m of Object.values(req.c)) {\n"
+        "      try {\n"
+        "        if (!m.exports || m.exports === window) continue;\n"
+        "        if (m.exports?.getToken) {\n"
+        "          token = m.exports.getToken();\n"
+        "          break;\n"
+        "        }\n"
+        "        for (let key in m.exports) {\n"
+        "          if (m.exports?.[key]?.getToken && m.exports[key][Symbol.toStringTag] !== 'IntlMessagesProxy') {\n"
+        "            token = m.exports[key].getToken();\n"
+        "            break;\n"
+        "          }\n"
+        "        }\n"
+        "        if (token) break;\n"
+        "      } catch {}\n"
+        "    }\n"
+        "  }]);\n"
+        "  window.webpackChunkdiscord_app.pop();\n"
+        "  return token;\n"
+        "})();\n"
+        "```"
+    )
+    await interaction.response.send_message(content=f"{instructions}\n{code_block}", ephemeral=True)
 
 
 @bot.tree.command(name="login", description="Đăng nhập tài khoản cá nhân để tự động làm quest (Mở popup điền bảo mật).")

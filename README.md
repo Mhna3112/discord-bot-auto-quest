@@ -84,6 +84,8 @@ Sau khi bot trực tuyến, nó sẽ tự động đồng bộ hóa cây lệnh 
 Tất cả kết quả của các lệnh này đều trả về dưới dạng **tin nhắn ẩn danh (ephemeral)**, nghĩa là chỉ có duy nhất bạn có thể đọc được kết quả phản hồi của lệnh đó trong kênh.
 
 - `/help` - Xem hướng dẫn sử dụng bot.
+- `/gettoken` - Lấy đoạn mã JavaScript để tự tìm token tài khoản Discord của bạn.
+- `/login` - Đăng nhập tài khoản làm nhiệm vụ (mở popup nhập token bảo mật).
 - `/status` - Xem danh sách quest cá nhân, trạng thái và tiến độ (`value/target`).
 - `/start` - Bắt đầu vòng quét quest tự động chạy ngầm cho tài khoản của bạn. Tiến trình chạy sẽ gửi về kênh log chung của bot.
 - `/stop` - Dừng quá trình quét quest tự động.
