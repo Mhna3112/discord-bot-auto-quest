@@ -44,12 +44,17 @@ class Colors:
     DIM    = "\033[2m"
 
 
-# Log callback for discord bot integration
+# Log and report callbacks for discord bot integration
 log_callback = None
+report_callback = None
 
 def register_log_callback(callback):
     global log_callback
     log_callback = callback
+
+def register_report_callback(callback):
+    global report_callback
+    report_callback = callback
 
 
 def log(msg: str, level: str = "info"):
@@ -323,15 +328,27 @@ def get_enrolled_at(quest: dict) -> Optional[str]:
 
 # ── Core logic ─────────────────────────────────────────────────────────────────
 class QuestAutocompleter:
-    def __init__(self, api: DiscordAPI, username: str):
+    def __init__(self, api: DiscordAPI, user_id: str, username: str, avatar_url: str):
         self.api = api
+        self.user_id = user_id
         self.username = username
+        self.avatar_url = avatar_url
         self.completed_ids: set = set()
         self.running = False
 
     def log(self, msg: str, level: str = "info"):
         """Wrapper to add username context to logs."""
         log(f"[@{self.username}] {msg}", level)
+
+    async def trigger_report(self, results: list):
+        """Invoke report callback to send summary report to Discord channel."""
+        if report_callback:
+            try:
+                loop = asyncio.get_running_loop()
+                if loop.is_running():
+                    loop.create_task(report_callback(self.user_id, self.username, self.avatar_url, results))
+            except RuntimeError:
+                pass
 
     # ── Fetch quests ───────────────────────────────────────────────────────────
     async def fetch_quests(self) -> list:
@@ -642,32 +659,10 @@ class QuestAutocompleter:
             self.log(f"── Quét lần #{cycle} ──", "info")
 
             quests = await self.fetch_quests()
-            total = len(quests)
-
+            
             if not quests:
                 self.log("Không có quest nào", "info")
             else:
-                enrolled_count = sum(1 for q in quests if is_enrolled(q))
-                completed_count = sum(1 for q in quests if is_completed(q))
-                completable_count = sum(1 for q in quests if is_completable(q))
-
-                self.log(
-                    f"Tổng: {total} quest | Enrolled: {enrolled_count} | "
-                    f"Completed: {completed_count} | Completable: {completable_count}",
-                    "info"
-                )
-
-                for q in quests:
-                    name = get_quest_name(q)
-                    task = get_task_type(q) or "?"
-                    if is_completed(q):
-                        status = f"{Colors.GREEN}✓{Colors.RESET}"
-                    elif is_enrolled(q):
-                        status = f"{Colors.YELLOW}▶{Colors.RESET}"
-                    else:
-                        status = f"{Colors.DIM}○{Colors.RESET}"
-                    self.log(f"  {status} {name} [{task}]", "info")
-
                 # Auto-accept
                 quests = await self.auto_accept(quests)
 
@@ -680,14 +675,36 @@ class QuestAutocompleter:
 
                 if actionable:
                     self.log(f"\n{len(actionable)} quest(s) cần hoàn thành:", "info")
+                    
+                    results = []
                     for q in actionable:
                         if not self.running:
                             break
-                        await self.process_quest(q)
+                        
+                        name = get_quest_name(q)
+                        try:
+                            # Process the quest
+                            task_type = get_task_type(q)
+                            if task_type in ("WATCH_VIDEO", "WATCH_VIDEO_ON_MOBILE"):
+                                await self.complete_video(q)
+                            elif task_type in ("PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP"):
+                                await self.complete_heartbeat(q)
+                            elif task_type == "PLAY_ACTIVITY":
+                                await self.complete_activity(q)
+                                
+                            results.append({"name": name, "success": True})
+                            self.completed_ids.add(q.get("id"))
+                        except Exception as e:
+                            self.log(f"Lỗi khi xử lý quest \"{name}\": {e}", "error")
+                            results.append({"name": name, "success": False})
+                    
+                    # Trigger summary report at the end of the processing
+                    if results:
+                        await self.trigger_report(results)
                 else:
                     self.log("Không có quest nào cần hoàn thành lúc này", "info")
 
-            self.log(f"\nChờ {POLL_INTERVAL}s... (Sử dụng !stop để dừng)\n", "info")
+            self.log(f"\nChờ {POLL_INTERVAL}s... (Sử dụng /stop để dừng)\n", "info")
             
             # Sleep in 1s increments to respond quickly to stops
             for _ in range(POLL_INTERVAL):

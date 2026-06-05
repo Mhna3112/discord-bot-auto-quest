@@ -89,8 +89,50 @@ async def discord_log_callback(msg: str, level: str):
         print(f"Error sending log to channel: {e}")
 
 
-# Register callback with main module
+# ── Discord Summary Report Callback ───────────────────────────────────────────
+async def discord_report_callback(user_id: str, username: str, avatar_url: str, results: list):
+    """Callback to send a summary embed report to the designated Discord log channel when a cycle completes."""
+    channel_id = os.getenv("LOG_CHANNEL_ID")
+    if not channel_id or channel_id == "YOUR_LOG_CHANNEL_ID_HERE":
+        return
+        
+    try:
+        channel = bot.get_channel(int(channel_id))
+        if not channel:
+            return
+            
+        success_count = sum(1 for r in results if r["success"])
+        total_count = len(results)
+        
+        embed = discord.Embed(
+            color=discord.Color.green() if success_count == total_count else discord.Color.orange()
+        )
+        embed.set_author(name=username, icon_url=avatar_url)
+        embed.title = "🎁 Quest Auto-Complete hoàn tất!"
+        
+        # Build description list matching user's layout
+        desc_lines = [f"📜 **Kết quả ({success_count}/{total_count} thành công)**"]
+        for r in results:
+            mark = "✅" if r["success"] else "❌"
+            desc_lines.append(f"{mark} {r['name']}")
+        embed.description = "\n".join(desc_lines)
+        
+        # Set footer icon to bot's avatar or default discord icon
+        bot_avatar_url = bot.user.avatar.url if bot.user.avatar else "https://cdn.discordapp.com/embed/avatars/0.png"
+        embed.set_footer(
+            text=f"User ID: {user_id} • Quest Auto-Completer",
+            icon_url=bot_avatar_url
+        )
+        embed.timestamp = discord.utils.utcnow()
+        
+        await channel.send(embed=embed)
+    except Exception as e:
+        print(f"Error sending summary report: {e}")
+
+
+# Register callbacks with main module
 main.register_log_callback(discord_log_callback)
+main.register_report_callback(discord_report_callback)
 
 
 # ── Bot Events ─────────────────────────────────────────────────────────────────
@@ -237,9 +279,16 @@ async def start(interaction: discord.Interaction):
             
         user_data = await r.json()
         username = user_data.get("username", "Unknown")
+        user_id_str = user_data.get("id")
+        avatar_hash = user_data.get("avatar")
+        
+        if avatar_hash:
+            avatar_url = f"https://cdn.discordapp.com/avatars/{user_id_str}/{avatar_hash}.png"
+        else:
+            avatar_url = "https://cdn.discordapp.com/embed/avatars/0.png"
         
         # Initialize and run completer loop
-        completer = main.QuestAutocompleter(api, username)
+        completer = main.QuestAutocompleter(api, user_id_str, username, avatar_url)
         active_completers[user_id] = completer
         active_tasks[user_id] = asyncio.create_task(completer.run())
         
@@ -353,7 +402,7 @@ async def status(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Có lỗi xảy ra: `{e}`", ephemeral=True)
 
 
-@bot.tree.command(name="check", description="Chạy quét quest một lần thủ công lập tức.")
+@bot.tree.command(name="check", description="Chạy quét quest một lần thủ công lập tức và hiển thị kết quả.")
 async def check(interaction: discord.Interaction):
     global active_tasks, active_completers
     user_id = interaction.user.id
@@ -382,8 +431,15 @@ async def check(interaction: discord.Interaction):
             
         user_data = await r.json()
         username = user_data.get("username", "Unknown")
+        user_id_str = user_data.get("id")
+        avatar_hash = user_data.get("avatar")
         
-        completer = main.QuestAutocompleter(api, username)
+        if avatar_hash:
+            avatar_url = f"https://cdn.discordapp.com/avatars/{user_id_str}/{avatar_hash}.png"
+        else:
+            avatar_url = "https://cdn.discordapp.com/embed/avatars/0.png"
+            
+        completer = main.QuestAutocompleter(api, user_id_str, username, avatar_url)
         completer.running = True
         
         quests = await completer.fetch_quests()
@@ -392,7 +448,6 @@ async def check(interaction: discord.Interaction):
             await api.close()
             return
             
-        await interaction.followup.send("⚙️ Tự động nhận các quest khả dụng...", ephemeral=True)
         quests = await completer.auto_accept(quests)
         
         actionable = [
@@ -401,12 +456,53 @@ async def check(interaction: discord.Interaction):
         ]
         
         if not actionable:
-            await interaction.followup.send("✅ Không có quest nào cần thực hiện lúc này.", ephemeral=True)
+            # Build and send empty result summary report matching user's layout
+            embed = discord.Embed(color=discord.Color.blue())
+            embed.set_author(name=username, icon_url=avatar_url)
+            embed.title = "🎁 Quest Auto-Complete hoàn tất!"
+            embed.description = "📜 **Kết quả (0/0 thành công)**\nKhông có nhiệm vụ nào cần thực hiện lúc này."
+            
+            bot_avatar_url = bot.user.avatar.url if bot.user.avatar else "https://cdn.discordapp.com/embed/avatars/0.png"
+            embed.set_footer(text=f"User ID: {user_id_str} • Quest Auto-Completer", icon_url=bot_avatar_url)
+            embed.timestamp = discord.utils.utcnow()
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
         else:
-            await interaction.followup.send(f"⚡ Đang hoàn thành {len(actionable)} quest...", ephemeral=True)
+            results = []
             for q in actionable:
-                await completer.process_quest(q)
-            await interaction.followup.send("✅ Đã hoàn thành quá trình chạy thử nghiệm thủ công.", ephemeral=True)
+                name = main.get_quest_name(q)
+                try:
+                    task_type = main.get_task_type(q)
+                    if task_type in ("WATCH_VIDEO", "WATCH_VIDEO_ON_MOBILE"):
+                        await completer.complete_video(q)
+                    elif task_type in ("PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP"):
+                        await completer.complete_heartbeat(q)
+                    elif task_type == "PLAY_ACTIVITY":
+                        await completer.complete_activity(q)
+                    results.append({"name": name, "success": True})
+                except Exception as e:
+                    results.append({"name": name, "success": False})
+            
+            success_count = sum(1 for r in results if r["success"])
+            total_count = len(results)
+            
+            embed = discord.Embed(
+                color=discord.Color.green() if success_count == total_count else discord.Color.orange()
+            )
+            embed.set_author(name=username, icon_url=avatar_url)
+            embed.title = "🎁 Quest Auto-Complete hoàn tất!"
+            
+            desc_lines = [f"📜 **Kết quả ({success_count}/{total_count} thành công)**"]
+            for r in results:
+                mark = "✅" if r["success"] else "❌"
+                desc_lines.append(f"{mark} {r['name']}")
+            embed.description = "\n".join(desc_lines)
+            
+            bot_avatar_url = bot.user.avatar.url if bot.user.avatar else "https://cdn.discordapp.com/embed/avatars/0.png"
+            embed.set_footer(text=f"User ID: {user_id_str} • Quest Auto-Completer", icon_url=bot_avatar_url)
+            embed.timestamp = discord.utils.utcnow()
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
             
         await api.close()
     except Exception as e:
